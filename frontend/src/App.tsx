@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { ResponsiveContainer, Tooltip, Treemap } from 'recharts';
 import 'leaflet/dist/leaflet.css';
 import './styles.css';
 
@@ -17,6 +18,7 @@ type Filters = { country: string; date: string };
 type DashboardData = {
   stats: Stats;
   topCountries: CountryRow[];
+  allCountries: CountryRow[];
   provinceRows: ProvinceRow[];
   countries: string[];
   dates: string[];
@@ -139,6 +141,7 @@ async function loadDashboard(filters: Filters): Promise<DashboardData> {
     byCountry.set(name, current);
   });
   const topCountries = Array.from(byCountry.values()).sort((a, b) => b.confirmed - a.confirmed).slice(0, 8);
+  const allCountries = Array.from(byCountry.values());
 
   const provinceRows = provinces
     .filter((p) => filters.country === 'All' || (p.CountryRegion?.Name || p.countryRegion?.Name || 'Unknown') === filters.country)
@@ -168,6 +171,7 @@ async function loadDashboard(filters: Filters): Promise<DashboardData> {
       dailyReports: latestDaily.length,
     },
     topCountries,
+    allCountries,
     provinceRows,
     countries: ['All', ...countries.map((c) => c.Name || 'Unknown').filter(Boolean)],
     dates: allDates,
@@ -185,9 +189,108 @@ async function loadDashboard(filters: Filters): Promise<DashboardData> {
   };
 }
 
+const CustomTreemapCell = (props: any) => {
+  const { x, y, width, height, index, name, value, total, onCellClick } = props;
+
+  const colors = [
+    '#3b82f6', // blue
+    '#ef4444', // red
+    '#10b981', // green
+    '#8b5cf6', // purple
+    '#ec4899', // pink
+    '#f59e0b', // yellow/amber
+    '#14b8a6', // teal
+    '#f97316', // orange
+    '#6366f1', // indigo
+    '#84cc16', // lime
+    '#06b6d4', // cyan
+    '#a855f7', // purple-light
+    '#d946ef', // fuchsia
+    '#f43f5e', // rose
+  ];
+  const color = colors[index % colors.length];
+  const percent = total > 0 ? ((value / total) * 100).toFixed(0) : '0';
+
+  const isLargeEnoughForName = width > 50 && height > 30;
+  const isLargeEnoughForValue = width > 70 && height > 50;
+  const isLargeEnoughForPercent = width > 70 && height > 65;
+
+  return (
+    <g onClick={() => onCellClick && onCellClick(name)} style={{ cursor: 'pointer' }}>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        style={{
+          fill: color,
+          stroke: '#050b1a',
+          strokeWidth: 1.5,
+          cursor: 'pointer',
+        }}
+      />
+      {isLargeEnoughForName && (
+        <text
+          x={x + 6}
+          y={y + 18}
+          fill="#fff"
+          fontSize={12}
+          fontWeight="bold"
+          style={{ pointerEvents: 'none' }}
+        >
+          {name}
+        </text>
+      )}
+      {isLargeEnoughForValue && (
+        <text
+          x={x + 6}
+          y={y + 34}
+          fill="rgba(255,255,255,0.9)"
+          fontSize={11}
+          style={{ pointerEvents: 'none' }}
+        >
+          {value.toLocaleString()}
+        </text>
+      )}
+      {isLargeEnoughForPercent && (
+        <text
+          x={x + 6}
+          y={y + 48}
+          fill="rgba(255,255,255,0.7)"
+          fontSize={10}
+          style={{ pointerEvents: 'none' }}
+        >
+          {percent}%
+        </text>
+      )}
+    </g>
+  );
+};
+
+const CustomTooltip = ({ active, payload, view, total }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    const viewLabel = view === 'daily' ? 'Daily Increase' : view.charAt(0).toUpperCase() + view.slice(1);
+    const percent = total > 0 ? ((data.value / total) * 100).toFixed(2) : '0.00';
+    return (
+      <div style={{ background: '#0b1730', border: '1px solid rgba(255,255,255,0.15)', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', color: '#e8f1ff' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#cfe4ff' }}>{data.name}</div>
+        <div>
+          {viewLabel}: <strong style={{ color: '#67f6dc' }}>{data.value.toLocaleString()}</strong>
+        </div>
+        <div style={{ color: '#9fb2d4', fontSize: '11px', marginTop: '2px' }}>
+          Share: {percent}%
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 export default function App() {
   const [stats, setStats] = useState<Stats>({ confirmed: 0, deaths: 0, recovered: 0, active: 0, dailyIncrease: 0, latestDate: '', dailyReports: 0 });
   const [topCountries, setTopCountries] = useState<CountryRow[]>([]);
+  const [allCountriesData, setAllCountriesData] = useState<CountryRow[]>([]);
   const [provinceRows, setProvinceRows] = useState<ProvinceRow[]>([]);
   const [filters, setFilters] = useState<Filters>({ country: 'All', date: '' });
   const [loading, setLoading] = useState(true);
@@ -199,13 +302,18 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
+  const handleCountryClick = (countryName: string) => {
+    setFilters(prev => ({ ...prev, country: countryName }));
+  };
+
   useEffect(() => {
     setLoading(true);
     setError(null);
     loadDashboard(filters)
-      .then(({ stats, topCountries, provinceRows, countries, dates }) => {
+      .then(({ stats, topCountries, allCountries, provinceRows, countries, dates }) => {
         setStats(stats);
         setTopCountries(topCountries);
+        setAllCountriesData(allCountries);
         setProvinceRows(provinceRows);
         setCountryOptions(countries);
         if (!filters.date) setDateOptions(dates);
@@ -214,6 +322,24 @@ export default function App() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, [filters]);
+
+  const treemapData = useMemo(() => {
+    return allCountriesData
+      .map((c) => {
+        const value = view === 'confirmed' ? c.confirmed
+                    : view === 'active' ? c.active
+                    : view === 'recovered' ? c.recovered
+                    : view === 'deaths' ? c.deaths
+                    : Math.max(c.confirmed - c.deaths - c.recovered, 0);
+        return { name: c.name, value };
+      })
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [allCountriesData, view]);
+
+  const totalMetricValue = useMemo(() => {
+    return treemapData.reduce((sum, item) => sum + item.value, 0);
+  }, [treemapData]);
 
   const totalPages = Math.ceil(provinceRows.length / itemsPerPage);
   const paginatedRows = useMemo(() => {
@@ -316,7 +442,7 @@ export default function App() {
                   </div>
                   <div className="hero-map panel-inner">
                     <Suspense fallback={<div className="mock-loading">Loading map...</div>}>
-                      <MapSection markers={provinceRows} />
+                      <MapSection markers={provinceRows} view={view} onCountrySelect={handleCountryClick} />
                     </Suspense>
                     <div className="hero-caption">
                       <strong>Interactive Choropleth Map View</strong>
@@ -331,36 +457,28 @@ export default function App() {
                     <p>The Treemap shows the number of Cases in different countries and their percent of total cases worldwide</p>
                   </div>
                   <div className="mock-treemap">
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-                      {topCountries.slice(0, 4).map((country, idx) => {
-                        const totalMetric = view === 'confirmed' ? stats.confirmed
-                                          : view === 'active' ? stats.active
-                                          : view === 'recovered' ? stats.recovered
-                                          : view === 'deaths' ? stats.deaths
-                                          : stats.dailyIncrease;
-                        const value = view === 'confirmed' ? country.confirmed
-                                    : view === 'active' ? country.active
-                                    : view === 'recovered' ? country.recovered
-                                    : view === 'deaths' ? country.deaths
-                                    : Math.max(country.confirmed - country.deaths - country.recovered, 0);
-                        const percent = totalMetric > 0 ? Math.round((value / totalMetric) * 100) : 0;
-                        return (
-                          <div key={country.name} className={`tile tile-${idx}`} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <strong>{country.name}</strong>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <span style={{ fontSize: '20px', fontWeight: 'bold' }}>{value.toLocaleString()}</span>
-                              {percent > 0 && <span style={{ fontSize: '12px', opacity: 0.8 }}>{percent}%</span>}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="treemap-scroll-container" style={{ flex: 1, height: 400, overflowX: 'auto', minWidth: 0 }}>
+                      <div style={{ width: '2000px', height: '100%' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <Treemap
+                            data={treemapData}
+                            dataKey="value"
+                            stroke="#050b1a"
+                            fill="#3b82f6"
+                            content={<CustomTreemapCell total={totalMetricValue} onCellClick={handleCountryClick} />}
+                          >
+                            <Tooltip content={<CustomTooltip view={view} total={totalMetricValue} />} />
+                          </Treemap>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                     <aside className="side-legend">
                       {([
                         { key: 'confirmed', label: 'Confirmed' },
                         { key: 'active', label: 'Active' },
                         { key: 'recovered', label: 'Recovered' },
-                        { key: 'deaths', label: 'Deaths' }
+                        { key: 'deaths', label: 'Deaths' },
+                        { key: 'daily', label: 'Daily Increase' }
                       ] as const).map((item) => (
                         <div 
                           key={item.key} 
@@ -391,7 +509,7 @@ export default function App() {
                 </div>
                 <div className="hero-map panel-inner" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                   <Suspense fallback={<div className="mock-loading">Loading map...</div>}>
-                    <MapSection markers={provinceRows} />
+                    <MapSection markers={provinceRows} view={view} onCountrySelect={handleCountryClick} />
                   </Suspense>
                 </div>
               </section>
